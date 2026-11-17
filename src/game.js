@@ -3613,16 +3613,27 @@ async function netConnect(hello) {
   const url = relayUrl();
   if (!url) { lobbyErr('ENTER THE RELAY SERVER ADDRESS'); return null; }
   NET.name = cleanName($('lbName').value); $('lbName').value = NET.name;
-  prefSet('tollgate-name', NET.name); prefSet('tollgate-relay', $('lbServer').value.trim());
+  prefSet('tollgate-name', NET.name);
   lobbyErr('CONNECTING…');
   const btns = document.querySelectorAll('#lbConnect button');
   for (const b of btns) b.disabled = true;
+  const host = u => u.replace(/^wss?:\/\//i, '').replace(/\/.*$/, '');
   try {
-    const conn = await openRelay(url, { ...hello, name: NET.name });
+    let conn;
+    try { conn = await openRelay(url, { ...hello, name: NET.name }); }
+    catch (e) {
+      // a remembered custom/old address failed: fall back to the game's own relay
+      if (!DEFAULT_RELAY || url === DEFAULT_RELAY) throw e;
+      lobbyErr(`${host(url)} DIDN'T ANSWER · TRYING THE DEFAULT SERVER…`);
+      conn = await openRelay(DEFAULT_RELAY, { ...hello, name: NET.name });
+      $('lbServer').value = DEFAULT_RELAY;
+    }
+    // remember the server only if it's not the default, so a future default change reaches everyone
+    prefSet('tollgate-relay', relayUrl() === DEFAULT_RELAY ? '' : $('lbServer').value.trim());
     lobbyErr('');
     conn.onclose = reason => netLost(reason);
     return conn;
-  } catch (e) { lobbyErr(String(e.message || e).toUpperCase()); return null; }
+  } catch (e) { lobbyErr(`${String(e.message || e).toUpperCase()} (${host(relayUrl())})`); return null; }
   finally { for (const b of btns) b.disabled = false; }
 }
 async function hostGame() {
