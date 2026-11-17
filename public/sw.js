@@ -1,6 +1,6 @@
 // Offline cache for the installed web app. the cache name is stamped at build time so each deploy refreshes the cache.
 const CACHE = 'tollgate-__BUILD__';
-const PRECACHE = ['./', './index.html', './game.js', './manifest.webmanifest', './assets/sky_bridge_1k.hdr', './icons/icon-192.png', './icons/icon-512.png'];
+const PRECACHE = ['./', './index.html', './game.js?v=__BUILD__', './manifest.webmanifest', './assets/sky_bridge_1k.hdr', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(PRECACHE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {

@@ -9,7 +9,9 @@ const t0 = Date.now();
 await esbuild.build({ entryPoints: ['src/game.js'], bundle: true, format: 'esm', target: 'es2022', minify: true, legalComments: 'none', outfile: `${out}/game.js`, logLevel: 'warning',
   define: { __RELAY_URL__: JSON.stringify(process.env.RELAY_URL || 'wss://tollgate-tactical-production.up.railway.app') } });
 fs.cpSync('public', out, { recursive: true });
-fs.copyFileSync('src/index.html', `${out}/index.html`);
-fs.writeFileSync(`${out}/sw.js`, fs.readFileSync('public/sw.js', 'utf8').replaceAll('__BUILD__', String(Date.now())));
+// stamp each build: the page asks for game.js?v=<build>, so a fresh page never runs a cached older game.js
+const BUILD = String(Date.now());
+fs.writeFileSync(`${out}/index.html`, fs.readFileSync('src/index.html', 'utf8').replace('src="./game.js"', `src="./game.js?v=${BUILD}"`));
+fs.writeFileSync(`${out}/sw.js`, fs.readFileSync('public/sw.js', 'utf8').replaceAll('__BUILD__', BUILD));
 const kb = f => (fs.statSync(`${out}/${f}`).size / 1024).toFixed(0) + ' KB';
 console.log(`built www/ in ${Date.now() - t0} ms  (game.js ${kb('game.js')}, index.html ${kb('index.html')})`);

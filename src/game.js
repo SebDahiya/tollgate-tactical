@@ -2504,6 +2504,7 @@ $('resume').addEventListener('click', () => { initAudio(); lock(); });
 $('again').addEventListener('click', () => { if (NET.mode === 'host') netStartMatch(); else if (NET.mode === 'off') startMatch(); lock(); });
 for (const b of document.querySelectorAll('.qbtns button[data-q]')) b.addEventListener('click', () => applyQuality(b.dataset.q));
 function applyQuality(name) {
+  if (!QUALITY[name]) return;
   qName = name; Q = QUALITY[name];
   try { localStorage.setItem('tollgate-quality', name); } catch (e) {}
   for (const b of document.querySelectorAll('.qbtns button[data-q]')) b.classList.toggle('on', b.dataset.q === name);
