@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Tollgate Tactical</string>
+    <string name="title_activity_main">Tollgate Tactical</string>
+    <string name="package_name">com.tollgate.tactical</string>
+    <string name="custom_url_scheme">com.tollgate.tactical</string>
+</resources>

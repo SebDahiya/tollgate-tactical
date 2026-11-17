@@ -1,0 +1,11 @@
+.vercel
+node_modules/
+www/
+*.apk
+# raw source assets (the game ships the compressed copies in public/)
+/assets-src/
+/*.exr
+/*.jpg
+/*.jpeg
+/*.png
+/backup-pre-multiplayer/

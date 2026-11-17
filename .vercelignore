@@ -1,0 +1,12 @@
+# Upload only what the build needs; keep reference images, raw HDRIs and native projects out
+/*.jpg
+/*.jpeg
+/*.png
+/*.exr
+/android
+/www
+/node_modules
+/*.apk
+/assets-src
+/backup-pre-multiplayer
+/server
