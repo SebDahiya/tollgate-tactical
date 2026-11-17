@@ -5,9 +5,9 @@ const out = 'www';
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 const t0 = Date.now();
-// RELAY_URL (e.g. wss://tollgate-relay.onrender.com) pre-fills the multiplayer server field
+// multiplayer relay the game connects to by default (override with RELAY_URL)
 await esbuild.build({ entryPoints: ['src/game.js'], bundle: true, format: 'esm', target: 'es2022', minify: true, legalComments: 'none', outfile: `${out}/game.js`, logLevel: 'warning',
-  define: { __RELAY_URL__: JSON.stringify(process.env.RELAY_URL || '') } });
+  define: { __RELAY_URL__: JSON.stringify(process.env.RELAY_URL || 'wss://tollgate-tactical-production.up.railway.app') } });
 fs.cpSync('public', out, { recursive: true });
 fs.copyFileSync('src/index.html', `${out}/index.html`);
 fs.writeFileSync(`${out}/sw.js`, fs.readFileSync('public/sw.js', 'utf8').replaceAll('__BUILD__', String(Date.now())));
