@@ -1615,10 +1615,12 @@ function updateDmgInds() {
   }
 }
 function renderBoard(el) {
-  const row = c => `<tr class="${c.alive ? '' : 'deadrow'}"><td style="color:${c.isPlayer ? 'var(--gold)' : c.team === player.team ? 'var(--ally)' : 'var(--enemy)'}">${c.name}${c.ctl === 'ai' && NET.mode !== 'off' ? ' <small>BOT</small>' : ''}</td><td>${c.kills}</td><td>${c.deaths}</td><td>${c.team === player.team ? '¤ ' + c.credits : '—'}</td></tr>`;
+  const mp = NET.mode !== 'off';
+  const ping = c => c.peer === 0 ? 'HOST' : c.isPlayer ? NET.ping + ' MS' : c.ctl !== 'ai' && c.ping >= 0 ? c.ping + ' MS' : 'BOT';
+  const row = c => `<tr class="${c.alive ? '' : 'deadrow'}"><td style="color:${c.isPlayer ? 'var(--gold)' : c.team === player.team ? 'var(--ally)' : 'var(--enemy)'}">${c.name}</td><td>${c.kills}</td><td>${c.deaths}</td><td>${c.team === player.team ? '¤ ' + c.credits : '—'}</td>${mp ? `<td><small>${ping(c)}</small></td>` : ''}</tr>`;
   const team = t => combatants.filter(c => c.team === t).sort((a, b) => b.kills - a.kills).map(row).join('');
   const role = t => R.attTeam === t ? 'ATTACK' : 'DEFENSE';
-  const sect = t => `<h3 style="color:${t === player.team ? 'var(--ally)' : 'var(--enemy)'}">${TEAM_NAMES[t]} · ${R.wins[t]} · ${role(t)}</h3><table><tr><th>NAME</th><th>K</th><th>D</th><th>CREDITS</th></tr>${team(t)}</table>`;
+  const sect = t => `<h3 style="color:${t === player.team ? 'var(--ally)' : 'var(--enemy)'}">${TEAM_NAMES[t]} · ${R.wins[t]} · ${role(t)}</h3><table><tr><th>NAME</th><th>K</th><th>D</th><th>CREDITS</th>${mp ? '<th>PING</th>' : ''}</tr>${team(t)}</table>`;
   el.innerHTML = sect(player.team) + sect(1 - player.team);
 }
 // minimap
@@ -2792,6 +2794,7 @@ function startMatch(mp) {
 }
 // net: the host's round data when running as a multiplayer client
 function startRound(net) {
+  if (!net) hostAdmitPending(); // players who joined mid-match take over their reserved bot now
   clearWorldForRound();
   R.phase = 'buy'; R.t = BUY_TIME; R.planted = false; R.beepT = 0;
   const C = R.charge;
@@ -3069,7 +3072,7 @@ function frame(t) {
   requestAnimationFrame(frame);
   const rdt = (t - last) / 1000; last = t;
   const dt = Math.min(0.05, rdt);
-  fpsAcc += rdt; fpsN++; if (fpsAcc > 0.5) { hud.fps.textContent = Math.round(fpsN / fpsAcc) + ' FPS · ' + qName.toUpperCase(); fpsAcc = 0; fpsN = 0; }
+  fpsAcc += rdt; fpsN++; if (fpsAcc > 0.5) { hud.fps.textContent = Math.round(fpsN / fpsAcc) + ' FPS · ' + qName.toUpperCase() + (NET.mode === 'client' ? ' · ' + NET.ping + ' MS' : ''); fpsAcc = 0; fpsN = 0; }
   windTime.value += dt;
   if (TOUCH) updateTouchUI();
   if (state === 'playing' && (!paused || NET.mode !== 'off')) update(dt); // an online match keeps running while you're paused
@@ -3290,7 +3293,8 @@ function menuBackdrop() {
    to the host, which applies them and broadcasts the result. Messages go through the
    relay (server/relay.mjs); see net.js for the connection itself.
    ===================================================================== */
-const NET = { mode: 'off', conn: null, id: 0, code: '', name: '', members: [], peerSlot: new Map(), sendT: 0, inMatch: false, busy: false };
+const NET = { mode: 'off', conn: null, id: 0, code: '', name: '', members: [], peerSlot: new Map(), pending: new Map(), sendT: 0, inMatch: false, busy: false, queued: false, ping: 0 };
+const PUBLIC_URL = 'https://gamefile.vercel.app/'; // where invite links point when playing from the Android app
 const SEND_HZ = 20;
 const r2 = v => Math.round(v * 100) / 100;
 const arr = v => [r2(v.x), r2(v.y), r2(v.z)];
@@ -3301,6 +3305,20 @@ const slotOf = c => (c && c.slot != null ? c.slot : -1);
 const bySlot = s => (Number.isInteger(s) && s >= 0 && s < 8 ? SLOT[s] : null);
 function netEmit(m, except) { if (NET.mode === 'host' && NET.conn) NET.conn.send((except != null ? '!' + except : '*') + '|' + JSON.stringify(m)); }
 function netSend(m) { if (NET.mode === 'client' && NET.conn) NET.conn.send(JSON.stringify(m)); }
+function netTo(id, m) { if (NET.mode === 'host' && NET.conn) NET.conn.send(id + '|' + JSON.stringify(m)); }
+// clients measure their round trip to the host every 2s and report it in their state
+setInterval(() => { if (NET.mode === 'client') netSend({ t: 'pi', c: Math.round(performance.now()) }); }, 2000);
+// browsers stop requestAnimationFrame in background tabs, which would freeze an online match
+// (the host simulates for everyone), so a worker-driven timer keeps stepping the game while hidden
+try {
+  const ticker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 50)'], { type: 'text/javascript' })));
+  ticker.onmessage = () => {
+    if (!document.hidden || state !== 'playing' || NET.mode === 'off') return;
+    const t = performance.now();
+    let rdt = Math.min(1, (t - last) / 1000); last = t;
+    while (rdt > 0.0001) { const s = Math.min(0.05, rdt); update(s); rdt -= s; }
+  };
+} catch (e) { console.warn('background ticker unavailable', e); }
 function netShot(c, W, o, d) {
   const m = { t: 'f', s: c.slot, o: arr(o), d: [+d.x.toFixed(4), +d.y.toFixed(4), +d.z.toFixed(4)], w: W.id };
   if (NET.mode === 'host') netEmit(m); else if (NET.mode === 'client' && c === player) netSend(m);
@@ -3363,12 +3381,13 @@ function hostSnapshot() {
   const C = R.charge;
   return { t: 'S', rt: r2(R.t), w: R.wins, ch: C.state === 'dropped' ? arr(C.pos) : 0,
     c: combatants.map(c => [c.slot, r2(c.pos.x), r2(c.pos.y), r2(c.pos.z), r2(c.vel.x), r2(c.vel.z), r2(c.isPlayer ? c.yaw + Math.PI : c.yaw), r2(c.isPlayer ? c.pitch : c.aimPitch),
-      Math.round(c.hp), Math.round(c.armor), c.weapon, r2(c.height), c.action || 0, r2(c.isPlayer && c.action === 'defuse' ? C.defuseProg : c.actionT || 0), c.kills, c.deaths, c.credits]) };
+      Math.round(c.hp), Math.round(c.armor), c.weapon, r2(c.height), c.action || 0, r2(c.isPlayer && c.action === 'defuse' ? C.defuseProg : c.actionT || 0), c.kills, c.deaths, c.credits,
+      c.isPlayer ? 0 : c.ctl === 'net' && c.ping >= 0 ? c.ping : -1]) };
 }
 function clientState() {
   const p = player, C = R.charge;
   return { t: 's', rn: R.round, p: arr(p.pos), v: [r2(p.vel.x), r2(p.vel.z)], y: r2(p.yaw + Math.PI), pi: r2(p.pitch), h: r2(p.height), w: p.weapon,
-    a: p.action || 0, at: r2(p.action === 'defuse' ? C.defuseProg : p.actionT || 0), cr: p.credits, ar: Math.round(p.armor) };
+    a: p.action || 0, at: r2(p.action === 'defuse' ? C.defuseProg : p.actionT || 0), cr: p.credits, ar: Math.round(p.armor), ms: NET.ping };
 }
 function applySnapshot(m) {
   R.t = num(m.rt, R.t);
@@ -3381,7 +3400,7 @@ function applySnapshot(m) {
     c.net = { x: num(e[1]), y: num(e[2]), z: num(e[3]), vx: num(e[4]), vz: num(e[5]), yaw: num(e[6]), pitch: num(e[7]), rt: now };
     c.hp = num(e[8], c.hp); c.armor = num(e[9]); if (WEAPONS[e[10]]) c.weapon = e[10]; c.height = num(e[11], 1.75);
     c.action = e[12] === 'plant' || e[12] === 'defuse' ? e[12] : null; c.actionT = num(e[13]);
-    c.kills = num(e[14]); c.deaths = num(e[15]); c.credits = num(e[16]);
+    c.kills = num(e[14]); c.deaths = num(e[15]); c.credits = num(e[16]); c.ping = num(e[17], -1);
   }
 }
 // ---------- host side ----------
@@ -3396,16 +3415,51 @@ function teamCount(t) { return NET.members.filter(m => m.team === t).length; }
 function hostOnRoom(m) {
   if (m.t === 'join') {
     const team = teamCount(0) <= teamCount(1) ? 0 : 1;
-    NET.members.push({ id: m.id, name: cleanName(m.name), team: teamCount(team) < 4 ? team : 1 - team });
+    const mem = { id: m.id, name: cleanName(m.name), team: teamCount(team) < 4 ? team : 1 - team };
+    NET.members.push(mem);
+    if (state === 'playing' && NET.inMatch) hostQueueJoin(mem);
     hostLobbyChanged();
   } else if (m.t === 'leave') {
     NET.members = NET.members.filter(x => x.id !== m.id);
+    NET.pending.delete(m.id);
     const s = NET.peerSlot.get(m.id);
     if (s != null) { NET.peerSlot.delete(m.id); const c = SLOT[s]; if (c && c.ctl === 'net') { aiTakeover(c); if (state === 'playing') popup(c.name + ' LEFT · BOT TAKES OVER'); } }
     hostLobbyChanged();
   }
 }
+// someone joined during a match: reserve a bot's slot for them, handed over at the next round start
+function hostQueueJoin(mem) {
+  const reserved = [...NET.pending.values()];
+  const humans = t => combatants.filter(c => c.team === t && c.ctl !== 'ai').length + reserved.filter(s => (s < 4 ? 0 : 1) === t).length;
+  const free = t => combatants.filter(c => c.team === t && c.ctl === 'ai' && !reserved.includes(c.slot));
+  let t = humans(0) <= humans(1) ? 0 : 1;
+  if (!free(t).length) t = 1 - t;
+  const f = free(t);
+  if (!f.length) return; // no bots left to replace: they play from the next match
+  NET.pending.set(mem.id, f[0].slot); mem.team = t;
+  netTo(mem.id, { t: 'queued' });
+}
+function hostAdmitPending() {
+  if (NET.mode !== 'host' || !NET.pending.size) return;
+  const admitted = [];
+  for (const [id, slot] of NET.pending) {
+    const c = SLOT[slot], mem = NET.members.find(x => x.id === id);
+    if (!c || c.ctl !== 'ai' || !mem) continue;
+    const i = bots.indexOf(c); if (i >= 0) bots.splice(i, 1);
+    nets.push(c);
+    Object.assign(c, { ctl: 'net', peer: id, net: null, ping: -1, name: mem.name, height: 1.75, action: null });
+    NET.peerSlot.set(id, slot); admitted.push(id);
+    netEmit({ t: 'ren', s: slot, n: mem.name });
+  }
+  NET.pending.clear();
+  if (!admitted.length) return;
+  const ro = combatants.map(c => ({ s: c.slot, n: c.name, p: c.isPlayer ? NET.id : c.ctl === 'net' ? c.peer : -1 }));
+  for (const id of admitted) netTo(id, { t: 'start', ro, cr: SLOT[NET.peerSlot.get(id)].credits });
+  popup(admitted.length === 1 ? NET.members.find(x => x.id === admitted[0]).name + ' JOINED' : admitted.length + ' PLAYERS JOINED');
+  hostLobbyChanged();
+}
 function hostOnPeer(id, m) {
+  if (m.t === 'pi') { netTo(id, { t: 'po', c: m.c }); return; }
   if (m.t === 'team') {
     const me = NET.members.find(x => x.id === id), t = m.team ? 1 : 0;
     if (me && me.team !== t && teamCount(t) < 4 && state !== 'playing') { me.team = t; hostLobbyChanged(); }
@@ -3421,6 +3475,7 @@ function hostOnPeer(id, m) {
       c.height = clamp(num(m.h, 1.75), 1, 1.9); if (WEAPONS[m.w]) c.weapon = m.w;
       c.action = m.a === 'plant' || m.a === 'defuse' ? m.a : null; c.actionT = num(m.at);
       c.credits = clamp(Math.round(num(m.cr, c.credits)), 0, ECON.max);
+      c.ping = clamp(Math.round(num(m.ms, -1)), -1, 9999);
       if (R.phase === 'buy') c.armor = c.armorMax = clamp(num(m.ar), 0, 50);
       break;
     }
@@ -3460,7 +3515,7 @@ function hostOnPeer(id, m) {
 // a player who disconnects mid-match hands their slot to a bot
 function aiTakeover(c) {
   const i = nets.indexOf(c); if (i >= 0) nets.splice(i, 1);
-  c.ctl = 'ai'; c.peer = -1; c.net = null; bots.push(c);
+  c.ctl = 'ai'; c.peer = -1; c.net = null; c.ping = -1; bots.push(c);
   const W = WEAPONS[c.weapon];
   c.loadout = { primary: W && W.slot === 'primary' ? W.id : null, side: W && W.slot === 'side' ? W.id : 'pistol' };
   if (c.loadout.primary) refill(c, c.loadout.primary);
@@ -3484,6 +3539,7 @@ function netStartMatch() {
     }
   }
   NET.peerSlot = new Map(spec.filter(e => e.kind === 'net').map(e => [e.peer, e.slot]));
+  NET.pending.clear();
   NET.inMatch = true;
   netEmit({ t: 'start', ro: spec.map(e => ({ s: e.slot, n: e.name || null, p: e.peer ?? -1 })) });
   setupRoster(spec);
@@ -3501,16 +3557,20 @@ function clientOnMsg(m) {
   if (m.t === 'start') {
     const spec = (Array.isArray(m.ro) ? m.ro : []).map(e => ({ slot: e.s, kind: e.p === NET.id ? 'me' : 'net', name: e.n ? cleanName(e.n) : null, peer: e.p }));
     if (!spec.some(e => e.kind === 'me')) return; // joined during a match: wait for the next one
-    NET.inMatch = true;
+    NET.inMatch = true; NET.queued = false;
     setupRoster(spec);
     startMatch(true);
+    if (num(m.cr) > 0) player.credits = clamp(Math.round(m.cr), 0, ECON.max); // took over a bot mid-match: keep its money
     lock();
     return;
   }
+  if (m.t === 'po') { NET.ping = clamp(Math.round(performance.now() - num(m.c)), 0, 9999); return; }
+  if (m.t === 'queued') { NET.queued = true; renderLobby(); return; }
   if (m.t === 'tolobby') { NET.inMatch = false; showLobbyScreen(); return; }
   if (!NET.inMatch) return;
   switch (m.t) {
     case 'S': applySnapshot(m); break;
+    case 'ren': { const c = bySlot(m.s); if (c && c !== player) c.name = cleanName(m.n); break; }
     case 'round':
       R.round = num(m.n, R.round); R.attTeam = m.att ? 1 : 0; if (Array.isArray(m.w)) R.wins = [num(m.w[0]), num(m.w[1])];
       R.halftime = !!m.half; if (R.halftime) for (const c of combatants) resetEconomy(c);
@@ -3547,7 +3607,7 @@ function relayUrl() {
   else if (!/^wss?:\/\//i.test(u)) u = 'wss://' + u;
   return u;
 }
-function lobbyErr(msg) { $('lbErr').textContent = msg || ''; }
+function lobbyErr(msg) { $('lbErr').textContent = msg || ''; $('lbErr').classList.add('err'); }
 async function netConnect(hello) {
   initAudio();
   const url = relayUrl();
@@ -3581,8 +3641,8 @@ async function joinGame() {
 }
 function netLeave() {
   if (NET.conn) NET.conn.close();
-  Object.assign(NET, { mode: 'off', conn: null, members: [], inMatch: false, busy: false });
-  NET.peerSlot.clear();
+  Object.assign(NET, { mode: 'off', conn: null, members: [], inMatch: false, busy: false, queued: false, ping: 0 });
+  NET.peerSlot.clear(); NET.pending.clear();
 }
 function netLost(reason) {
   const inGame = state === 'playing' || state === 'ended';
@@ -3616,6 +3676,7 @@ function renderLobby() {
   $('lbBack').textContent = inRoom ? 'LEAVE ROOM' : 'BACK';
   if (!inRoom) return;
   $('lbCodeShow').textContent = NET.code;
+  $('lbLink').value = inviteUrl();
   for (const t of [0, 1]) {
     const ol = $('lbT' + t); ol.textContent = '';
     const ms = NET.members.filter(m => m.team === t);
@@ -3631,7 +3692,35 @@ function renderLobby() {
   $('lbSwap').classList.toggle('hidden', state === 'playing' && host);
   $('lbStatus').textContent = host
     ? (state === 'playing' ? 'MATCH IN PROGRESS' : `${humans} PLAYER${humans === 1 ? '' : 'S'} · EMPTY SLOTS ARE FILLED WITH BOTS`)
+    : NET.queued ? 'MATCH IN PROGRESS · YOU TAKE OVER A BOT WHEN THE NEXT ROUND STARTS'
     : NET.busy ? 'MATCH IN PROGRESS · YOU JOIN THE NEXT ONE' : 'WAITING FOR THE HOST TO START';
+}
+// ---------- invite links: <game>/?room=ABCD opens the lobby with the code filled in ----------
+function inviteUrl() {
+  const web = /^https?:$/.test(location.protocol) && !IS_APP && !/^(localhost|127\.)/.test(location.hostname) ? location.origin + location.pathname : PUBLIC_URL;
+  return web + '?room=' + NET.code;
+}
+async function shareInvite() {
+  const url = inviteUrl(), btn = $('lbCopy');
+  const done = t => { btn.textContent = t; setTimeout(() => { btn.textContent = 'COPY INVITE LINK'; }, 1600); };
+  if (TOUCH && navigator.share) { try { await navigator.share({ title: 'Tollgate Tactical', text: `Join my Tollgate Tactical match (room ${NET.code})`, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+  try { await navigator.clipboard.writeText(url); done('COPIED!'); return; } catch (e) {}
+  const inp = $('lbLink'); inp.focus(); inp.select();
+  try { document.execCommand('copy'); done('COPIED!'); } catch (e) { done('SELECT & COPY IT'); }
+}
+$('lbCopy').addEventListener('click', shareInvite);
+$('lbLink').addEventListener('focus', e => e.target.select());
+function openInviteFromUrl() {
+  let code = '';
+  try { code = (new URLSearchParams(location.search).get('room') || '').toUpperCase().replace(/[^A-Z]/g, ''); } catch (e) {}
+  if (code.length !== 4) return;
+  try { history.replaceState(null, '', location.pathname); } catch (e) {} // a reload shouldn't re-open the invite
+  $('menu').classList.add('hidden'); $('lobby').classList.remove('hidden');
+  $('lbCode').value = code;
+  renderLobby();
+  lobbyErr(`INVITED TO ROOM ${code} · ${$('lbName').value ? 'PRESS JOIN' : 'PICK A CALLSIGN, THEN PRESS JOIN'}`);
+  $('lbErr').classList.remove('err');
+  $(!$('lbName').value ? 'lbName' : 'lbJoin').focus();
 }
 function updateMpButtons() {
   const mp = NET.mode !== 'off', host = NET.mode === 'host';
@@ -3691,6 +3780,7 @@ for (const p of props) { p.obj.position.copy(p.body.translation()); p.obj.quater
 if (!HEADLESS) renderer.compile(scene, camera);
 state = 'menu';
 $('loading').classList.add('hidden'); $('menu').classList.remove('hidden');
+openInviteFromUrl();
 requestAnimationFrame(frame);
 window.__game = { player, bots, combatants, statics, props, ragdolls, debris, R, world, get now() { return now; } };
 globalThis.__T = { startMatch, startRound, update, player, bots, combatants, R, SITES, findPath, NAV, statics, props, ragdolls, debris, glassPanes, traceShot, kill, applyDamage, smokeBlocks, curErr, popFlash, plantCharge, defuseCharge, explodeCharge, updatePlayerAction, keys, WEAPONS, losClear, throwUtil, clouds, grenades, buyItem, playerBuy, siteAt, walkable, get state() { return state; }, world, NET, SLOT, nets, get now() { return now; } };
