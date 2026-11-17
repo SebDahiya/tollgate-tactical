@@ -144,6 +144,7 @@ canvas{display:block}
 .row input{accent-color:var(--gold);width:180px}
 .qbtns{display:flex;gap:6px}
 .qbtns button{font-family:inherit;font-weight:700;font-size:13px;letter-spacing:2px;padding:5px 12px;background:rgba(255,255,255,.07);color:var(--txt);border:1px solid rgba(255,255,255,.18);cursor:pointer}
+.qbtns button:disabled{opacity:.3}
 .qbtns button.on{background:var(--gold);color:#111;border-color:var(--gold)}
 button.go{font-family:inherit;font-weight:700;font-size:22px;letter-spacing:6px;padding:12px 44px;background:var(--gold);color:#111;border:0;cursor:pointer;clip-path:polygon(12px 0,100% 0,calc(100% - 12px) 100%,0 100%);transition:transform .1s,filter .1s;margin-top:6px}
 button.go:hover{filter:brightness(1.1);transform:translateX(3px)}
@@ -270,12 +271,12 @@ button:disabled{opacity:.45;pointer-events:none}
 
 <div id="menu" class="overlay hidden">
   <div class="panel">
-    <div class="kicker">TACTICAL 2v2 DEMO</div>
+    <div class="kicker">TACTICAL SHOOTER</div>
     <h1>TOLLGATE</h1>
     <div class="sub">PLANT · DEFUSE · FIRST TO 7 ROUNDS</div>
     <div class="teams">
-      <div class="tc a"><b>RAVEN</b><span>You + Mika</span></div>
-      <div class="tc e"><b>FROST</b><span>Vesna + Lyra</span></div>
+      <div class="tc a"><b>RAVEN</b><span id="mTeamA">You + Mika</span></div>
+      <div class="tc e"><b>FROST</b><span id="mTeamB">Vesna + Lyra</span></div>
     </div>
     <div class="controls desk">
       <kbd>WASD · SHIFT</kbd><span>Move · walk silently</span>
@@ -286,6 +287,7 @@ button:disabled{opacity:.45;pointer-events:none}
       <kbd>F (hold)</kbd><span>Plant the charge on a site / defuse it</span>
       <kbd>SPACE · C · TAB</kbd><span>Jump · crouch · scoreboard</span>
     </div>
+    <div class="row">MODE <span class="qbtns sizebtns" id="soloSize"><button data-s="1">1v1</button><button data-s="2">2v2</button><button data-s="4">4v4</button></span></div>
     <div class="row">GRAPHICS <span class="qbtns"><button data-q="low">LOW</button><button data-q="medium">MEDIUM</button><button data-q="high">HIGH</button></span></div>
     <div class="row mob">TOUCH AIM <input id="tsens" type="range" min="0.3" max="2.5" step="0.05" value="1"><span id="tsensv">1.00</span></div>
     <div class="row desk">SENSITIVITY <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1"><span id="sensv">1.00</span></div>
@@ -343,6 +345,7 @@ button:disabled{opacity:.45;pointer-events:none}
         <div class="tc a"><b>RAVEN</b><ol id="lbT0" class="lbl"></ol></div>
         <div class="tc e"><b>FROST</b><ol id="lbT1" class="lbl"></ol></div>
       </div>
+      <div class="row">MODE <span class="qbtns sizebtns" id="lbSize"><button data-s="1">1v1</button><button data-s="2">2v2</button><button data-s="4">4v4</button></span><span class="lbmsg" id="lbSizeNote" style="margin:0"></span></div>
       <div id="lbStatus" class="lbmsg"></div>
       <button class="go" id="lbStart">START MATCH</button><button class="ghost" id="lbSwap">SWITCH TEAM</button>
     </div>

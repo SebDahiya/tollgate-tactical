@@ -1296,7 +1296,13 @@ const TEAM_LOOKS = [
   [LOOKS.raven, LOOKS.raven, { ...LOOKS.raven, hair: '#4a2c1e' }, { ...LOOKS.raven, hair: '#b88a52', skin: '#d9a98c' }],
   [LOOKS.frost, { ...LOOKS.frost, hair: '#b8bcc8', fur: '#2c2320', pants: '#2f3330' }, { ...LOOKS.frost, hair: '#e2d2b0' }, { ...LOOKS.frost, hair: '#9a7a64', fur: '#3a2e26' }],
 ];
-const SOLO_ROSTER = [{ slot: 0, kind: 'me', name: 'YOU' }, { slot: 1, kind: 'ai' }, { slot: 4, kind: 'ai' }, { slot: 5, kind: 'ai' }];
+const SOLO_ROSTER = [{ slot: 0, kind: 'me', name: 'YOU' }, { slot: 1, kind: 'ai' }, { slot: 4, kind: 'ai' }, { slot: 5, kind: 'ai' }]; // also the menu backdrop
+const TEAM_SIZES = [1, 2, 4];
+// solo vs bots: you + (size-1) bots against size bots
+const soloRoster = size => [{ slot: 0, kind: 'me', name: 'YOU' }, ...Array.from({ length: size - 1 }, (_, i) => ({ slot: 1 + i, kind: 'ai' })),
+  ...Array.from({ length: size }, (_, i) => ({ slot: 4 + i, kind: 'ai' }))];
+let soloSize = 2;
+try { const s = +localStorage.getItem('tollgate-size'); if (TEAM_SIZES.includes(s)) soloSize = s; } catch (e) {}
 const SLOT = new Array(8).fill(null), nets = [];
 const botPool = [];
 for (let i = 0; i < 7; i++) botPool.push(createBot('BOT', 0, LOOKS.raven));
@@ -2496,11 +2502,11 @@ renderer.domElement.addEventListener('click', () => { if (state === 'playing' &&
 $('deploy').addEventListener('click', () => { initAudio(); startMatch(); lock(); });
 $('resume').addEventListener('click', () => { initAudio(); lock(); });
 $('again').addEventListener('click', () => { if (NET.mode === 'host') netStartMatch(); else if (NET.mode === 'off') startMatch(); lock(); });
-for (const b of document.querySelectorAll('.qbtns button')) b.addEventListener('click', () => applyQuality(b.dataset.q));
+for (const b of document.querySelectorAll('.qbtns button[data-q]')) b.addEventListener('click', () => applyQuality(b.dataset.q));
 function applyQuality(name) {
   qName = name; Q = QUALITY[name];
   try { localStorage.setItem('tollgate-quality', name); } catch (e) {}
-  for (const b of document.querySelectorAll('.qbtns button')) b.classList.toggle('on', b.dataset.q === name);
+  for (const b of document.querySelectorAll('.qbtns button[data-q]')) b.classList.toggle('on', b.dataset.q === name);
   renderer.setPixelRatio(Math.min(devicePixelRatio, Q.pr)); renderer.setSize(innerWidth, innerHeight);
   if (composer) { composer.setPixelRatio(Math.min(devicePixelRatio, Q.pr)); composer.setSize(innerWidth, innerHeight); gtaoPass.enabled = Q.ao; bloomPass.enabled = Q.bloom; }
   sun.shadow.mapSize.set(Q.shadow, Q.shadow);
@@ -2782,7 +2788,7 @@ function clearWorldForRound() {
 function resetEconomy(c) { c.credits = ECON.start; c.loadout = { primary: null, side: 'pistol' }; c.armor = 0; c.armorMax = 0; c.smokes = 0; c.flashes = 0; }
 // mp: true when a multiplayer match starts (roster already set up by the lobby)
 function startMatch(mp) {
-  if (!mp) { netLeave(); setupRoster(SOLO_ROSTER); }
+  if (!mp) { netLeave(); setupRoster(soloRoster(soloSize)); }
   R.wins = [0, 0]; R.round = 1; R.attTeam = 0; R.lossStreak = [0, 0]; R.halftime = false;
   for (const c of combatants) { c.kills = 0; c.deaths = 0; resetEconomy(c); c.alive = false; }
   hud.killfeed.innerHTML = '';
@@ -3293,7 +3299,7 @@ function menuBackdrop() {
    to the host, which applies them and broadcasts the result. Messages go through the
    relay (server/relay.mjs); see net.js for the connection itself.
    ===================================================================== */
-const NET = { mode: 'off', conn: null, id: 0, code: '', name: '', members: [], peerSlot: new Map(), pending: new Map(), sendT: 0, inMatch: false, busy: false, queued: false, ping: 0 };
+const NET = { mode: 'off', conn: null, id: 0, code: '', name: '', members: [], peerSlot: new Map(), pending: new Map(), sendT: 0, inMatch: false, busy: false, queued: false, ping: 0, size: 4 };
 const PUBLIC_URL = 'https://gamefile.vercel.app/'; // where invite links point when playing from the Android app
 const SEND_HZ = 20;
 const r2 = v => Math.round(v * 100) / 100;
@@ -3416,6 +3422,7 @@ function hostOnRoom(m) {
   if (m.t === 'join') {
     const team = teamCount(0) <= teamCount(1) ? 0 : 1;
     const mem = { id: m.id, name: cleanName(m.name), team: teamCount(team) < 4 ? team : 1 - team };
+    if (teamCount(mem.team) >= NET.size && state !== 'playing') NET.size = fitSize(teamCount(mem.team) + 1); // room full at this size: grow it
     NET.members.push(mem);
     if (state === 'playing' && NET.inMatch) hostQueueJoin(mem);
     hostLobbyChanged();
@@ -3462,7 +3469,7 @@ function hostOnPeer(id, m) {
   if (m.t === 'pi') { netTo(id, { t: 'po', c: m.c }); return; }
   if (m.t === 'team') {
     const me = NET.members.find(x => x.id === id), t = m.team ? 1 : 0;
-    if (me && me.team !== t && teamCount(t) < 4 && state !== 'playing') { me.team = t; hostLobbyChanged(); }
+    if (me && me.team !== t && teamCount(t) < NET.size && state !== 'playing') { me.team = t; hostLobbyChanged(); }
     return;
   }
   const s = NET.peerSlot.get(id), c = s != null ? SLOT[s] : null;
@@ -3526,14 +3533,16 @@ function aiTakeover(c) {
   c.stuckPos.copy(c.pos);
 }
 function hostLobbyChanged() {
-  netEmit({ t: 'L', code: NET.code, m: NET.members, busy: state === 'playing' });
+  netEmit({ t: 'L', code: NET.code, m: NET.members, busy: state === 'playing', size: NET.size });
   renderLobby();
 }
+const fitSize = n => TEAM_SIZES.find(s => s >= n) || 4;
 function netStartMatch() {
+  NET.size = Math.max(NET.size, fitSize(Math.max(teamCount(0), teamCount(1)))); // never leave a waiting player out
   const spec = [];
   for (const t of [0, 1]) {
     const ms = NET.members.filter(m => m.team === t);
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < NET.size; i++) {
       const m = ms[i], slot = t * 4 + i;
       spec.push(m ? { slot, kind: m.id === NET.id ? 'me' : 'net', name: m.name, peer: m.id } : { slot, kind: 'ai' });
     }
@@ -3553,7 +3562,7 @@ function clientOnRaw(raw) {
   try { clientOnMsg(m); } catch (e) { console.warn('net message failed', m.t, e); }
 }
 function clientOnMsg(m) {
-  if (m.t === 'L') { NET.members = Array.isArray(m.m) ? m.m.map(x => ({ id: x.id, name: cleanName(x.name), team: x.team ? 1 : 0 })) : []; NET.code = String(m.code || NET.code); NET.busy = !!m.busy; renderLobby(); return; }
+  if (m.t === 'L') { NET.members = Array.isArray(m.m) ? m.m.map(x => ({ id: x.id, name: cleanName(x.name), team: x.team ? 1 : 0 })) : []; NET.code = String(m.code || NET.code); NET.busy = !!m.busy; if (TEAM_SIZES.includes(m.size)) NET.size = m.size; renderLobby(); return; }
   if (m.t === 'start') {
     const spec = (Array.isArray(m.ro) ? m.ro : []).map(e => ({ slot: e.s, kind: e.p === NET.id ? 'me' : 'net', name: e.n ? cleanName(e.n) : null, peer: e.p }));
     if (!spec.some(e => e.kind === 'me')) return; // joined during a match: wait for the next one
@@ -3638,7 +3647,8 @@ async function netConnect(hello) {
 }
 async function hostGame() {
   const conn = await netConnect({ t: 'host' }); if (!conn) return;
-  Object.assign(NET, { mode: 'host', conn, id: 0, code: conn.code, members: [{ id: 0, name: NET.name, team: 0 }], inMatch: false, busy: false });
+  const saved = +prefGet('tollgate-mp-size');
+  Object.assign(NET, { mode: 'host', conn, id: 0, code: conn.code, members: [{ id: 0, name: NET.name, team: 0 }], inMatch: false, busy: false, size: TEAM_SIZES.includes(saved) ? saved : 4 });
   conn.onmessage = hostOnRaw;
   renderLobby();
 }
@@ -3691,14 +3701,20 @@ function renderLobby() {
   for (const t of [0, 1]) {
     const ol = $('lbT' + t); ol.textContent = '';
     const ms = NET.members.filter(m => m.team === t);
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < NET.size; i++) {
       const m = ms[i], li = document.createElement('li');
       li.textContent = m ? m.name + (m.id === 0 ? '  ★ HOST' : '') : 'BOT · ' + BOT_NAMES[t][i];
       li.className = !m ? 'bot' : m.id === NET.id ? 'me' : '';
       ol.append(li);
     }
   }
-  const host = NET.mode === 'host', humans = NET.members.length;
+  const host = NET.mode === 'host', humans = NET.members.length, need = Math.max(teamCount(0), teamCount(1));
+  for (const b of document.querySelectorAll('#lbSize button')) {
+    const s = +b.dataset.s;
+    b.classList.toggle('on', s === NET.size);
+    b.disabled = !host || state === 'playing' || s < need; // a team can't be smaller than its players
+  }
+  $('lbSizeNote').textContent = host ? (state === 'playing' ? '' : need > 1 ? `MIN ${fitSize(need)}v${fitSize(need)} FOR THESE TEAMS` : '') : 'HOST PICKS';
   $('lbStart').classList.toggle('hidden', !host || state === 'playing');
   $('lbSwap').classList.toggle('hidden', state === 'playing' && host);
   $('lbStatus').textContent = host
@@ -3720,6 +3736,20 @@ async function shareInvite() {
   try { document.execCommand('copy'); done('COPIED!'); } catch (e) { done('SELECT & COPY IT'); }
 }
 $('lbCopy').addEventListener('click', shareInvite);
+// ---------- team size: 1v1 / 2v2 / 4v4 ----------
+for (const b of document.querySelectorAll('#lbSize button')) b.addEventListener('click', () => {
+  const s = +b.dataset.s;
+  if (NET.mode !== 'host' || state === 'playing' || s < Math.max(teamCount(0), teamCount(1))) return;
+  NET.size = s; prefSet('tollgate-mp-size', String(s)); hostLobbyChanged();
+});
+function updateSoloSize() {
+  for (const b of document.querySelectorAll('#soloSize button')) b.classList.toggle('on', +b.dataset.s === soloSize);
+  const names = (t, from) => BOT_NAMES[t].slice(from, from + (t === 0 ? soloSize - 1 : soloSize)).map(n => n[0] + n.slice(1).toLowerCase());
+  $('mTeamA').textContent = ['You', ...names(0, 1)].join(' + ');
+  $('mTeamB').textContent = names(1, 0).join(' + ');
+}
+for (const b of document.querySelectorAll('#soloSize button')) b.addEventListener('click', () => { soloSize = +b.dataset.s; prefSet('tollgate-size', String(soloSize)); updateSoloSize(); });
+updateSoloSize();
 $('lbLink').addEventListener('focus', e => e.target.select());
 function openInviteFromUrl() {
   let code = '';
@@ -3749,7 +3779,7 @@ $('lbCode').addEventListener('keydown', e => { if (e.key === 'Enter') joinGame()
 $('lbStart').addEventListener('click', () => { if (NET.mode === 'host' && state !== 'playing') { netStartMatch(); lock(); } });
 $('lbSwap').addEventListener('click', () => {
   const me = NET.members.find(m => m.id === NET.id); if (!me) return;
-  if (NET.mode === 'host') { if (state !== 'playing' && teamCount(1 - me.team) < 4) { me.team = 1 - me.team; hostLobbyChanged(); } }
+  if (NET.mode === 'host') { if (state !== 'playing' && teamCount(1 - me.team) < NET.size) { me.team = 1 - me.team; hostLobbyChanged(); } }
   else netSend({ t: 'team', team: 1 - me.team });
 });
 $('lbBack').addEventListener('click', () => {
@@ -3794,5 +3824,5 @@ $('loading').classList.add('hidden'); $('menu').classList.remove('hidden');
 openInviteFromUrl();
 requestAnimationFrame(frame);
 window.__game = { player, bots, combatants, statics, props, ragdolls, debris, R, world, get now() { return now; } };
-globalThis.__T = { startMatch, startRound, update, player, bots, combatants, R, SITES, findPath, NAV, statics, props, ragdolls, debris, glassPanes, traceShot, kill, applyDamage, smokeBlocks, curErr, popFlash, plantCharge, defuseCharge, explodeCharge, updatePlayerAction, keys, WEAPONS, losClear, throwUtil, clouds, grenades, buyItem, playerBuy, siteAt, walkable, get state() { return state; }, world, NET, SLOT, nets, get now() { return now; } };
+globalThis.__T = { startMatch, startRound, update, player, bots, combatants, R, SITES, findPath, NAV, statics, props, ragdolls, debris, glassPanes, traceShot, kill, applyDamage, smokeBlocks, curErr, popFlash, plantCharge, defuseCharge, explodeCharge, updatePlayerAction, keys, WEAPONS, losClear, throwUtil, clouds, grenades, buyItem, playerBuy, siteAt, walkable, get state() { return state; }, world, NET, SLOT, nets, quitToMenu, get now() { return now; } };
 
